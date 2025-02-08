@@ -1,0 +1,95 @@
+#!/bin/bash
+
+# Funcion para detectar sistema y version
+
+detectar_os() {
+        OS=""
+        VERSION=""
+
+        if [[ -f /etc/os-release ]] ; then
+                . /etc/os-release
+                OS=$ID
+                VERSION=$VERSION_ID
+        elif [[ "$(uname)" == "Darwin" ]] ; then
+                OS="Macos"
+                VERSION=$(sw_vers -productVersion)
+        else
+                echo " [ERROR]-->  SO no soportado."
+                exit 1
+        fi
+        echo "$(date) [SUCCESS]--> SO detectado: $OS $VERSION"
+}
+## extraemos el nro entero de la version para validad
+NRO_VERSION=$(echo "$VERSION" | cut -d. -f1)
+
+## funcion para update & install python3
+update_system(){
+        case $OS in
+                ubuntu|debian)
+                        echo " [WARNING]--> Ejectuando actualizacion en Debian/Ubuntu $VERSION... "
+                        sudo apt-get update -q -y
+                        ;;
+                fedora|centos|rhel)
+                        echo "[WARNING]-> Actualizando en Fedora/centos/rhel $VERSION"
+                        sudo dnf update -q -y
+                        ;;
+                amazon)
+                        echo "[WARNING]-> Actualizando en Amazon Linux $VERSION"
+                        sudo yum update -q -y
+                        ;;
+                macos)
+                        echo "[WARNING]-> Actualizando en macos $VERSION"
+                        brew update && brew upgrade
+                        ;;
+                *)
+                        echo "[ERROR] SO no soportado."
+                        exit 1
+                        ;;
+        esac
+        echo "[SUCCESS]-> Actualizaciòn del so completada."
+}
+
+## instalar python3
+install_python3(){
+        if [ command -v python3 &> /dev/null ] ; then
+                echo "[SUCCESS]-> Python3 està instalada en su sistema."
+        else
+                case $OS in
+                        ubuntu|debian)
+                                #controlamos versiones
+                                if [[ ! $NRO_VERSION < 20 ]] ; then
+                                        echo "[ERROR] La version de $SO $NRO_VERSION es muy antigua, se recomienda actualizar para mejor compatibilidad con python3."
+
+                                exit 1
+                                fi
+                                sudo apt-get install -q -y python3
+                                ;;
+                        fedora|rhel|centos)
+                                if [[ $NRO_VERSION < 8 ]] ; then
+                                        echo "[ERROR]-> La version de $OS $VERSION es muy antigua, se recomiendo actualizar para mejor compatibilidad con python3."
+                                exit 1
+                                fi
+                                sudo dnf install -q -y python3
+                                ;;
+                        amazon)
+                                sudo yum install -q -y python3
+                                ;;
+                        macos)
+                                brew install python3
+                                ;;
+                        *)
+                                echo "Instalacion de python3 no soportada por el sistema"
+                                exit 1
+                                ;;
+                esac
+                echo "[SUCCESS] -> Python3 instalado correctamente."
+        fi
+}
+
+
+# Ejecucion de funciones
+detectar_os
+update_system
+install_python3
+
+echo "$(date) [FINALIZADO]-> El $SO $VERSION esta listo con python3 instalada."
