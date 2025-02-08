@@ -1,0 +1,178 @@
+## importamos lo necesario
+import os
+import sys
+import subprocess
+import datetime
+# Variables globales
+RUTA_APP = "/home/tomas-ubuntu/app-Python-Flask"
+RUTA_VENV = os.path.join(RUTA_APP, "python-flaskvenv")
+GITHUB_REPO = "https://github.com/roxsross/devops-static-web.git"
+BRANCH = "booklibrary"
+DESTINO = "/home/tomas-ubuntu/app-Python-Flask/ProyectoLibreriaFlask"
+
+# funcion para mostrar date
+def print_date(mensaje):
+    ahora = datetime.datetime.now()
+    fecha_hora = ahora.strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{fecha_hora}] {mensaje}")
+
+# buscamos el sistema
+def detectar_so():
+        try:
+            with open("/etc/os-release") as f:
+                os_info = f.read().lower()
+                if "ubuntu" in os_info or "debian" in os_info:
+                    return "debian"
+                elif "fedora" in os_info or "centos" in os_info or "rhel" in os_info:
+                    return "rhel"
+                elif "amzn" in os_info:
+                    return "amazon"
+                elif "arch" in os_info:
+                    return "arch"
+                elif "darwin" in os_info:
+                    return "macos"
+        except FileNotFoundError:
+            if sys.platform == "darwin":
+                return "macos"
+        return "desconocido"
+# buscamos paquetes en sistema
+def paquete_instalado(paquete):
+    try:
+        subprocess.run(["which", paquete], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
+# instalamos paquetes según la distro
+def instalar_paquetes(so):
+    paquetes = ["python3-pip","python3-venv", "git", "nginx"]
+    # corroboramos los paquetes
+    pip = paquete_instalado("pip3")
+    venv = paquete_instalado("python3 -m venv")
+    git = paquete_instalado("git")
+    if pip and venv and git:
+        print("Pip3 y venv3 están instalados previamente. Saltando instalacion..")
+        return
+
+    comandos = {
+            "debian":f"sudo apt update -q -y && sudo apt install -q -y {' '.join(paquetes)}",
+            "rhel": f"sudo dnf install -q -y {' '.join(paquetes)}",
+            "amazon": f"sudo yum -q -y {' '.join(paquetes)}",
+            "arch": f"sudo pacman -S --noconfirm {' '.join(paquetes)}",
+            "macos": f"brew install python3 git nginx"
+            }
+    if so in comandos:
+        print(f"[WARNING] Instalando py-py, py-venv en {so}..")
+        subprocess.run(comandos[so], shell=True, check=True)
+    else:
+        print("[ERROR] Sistema operativo no soportado.")
+        sys.exit(1)
+
+# Crear y configurar entorno virtual de python
+def configurar_entorno():
+    #ruta_app = "/home/tomas-ubuntu/ScriptPython/challenge-pyflask"
+    #ruta_venv = os.path.join(ruta_app, "python-flaskvenv")
+
+    # validamos que no exista la carpeta
+    if not os.path.exists(RUTA_APP):
+        print(f"[WARNING] Creando directorio de proyecto en {ruta_app}..")
+        os.makedirs(RUTA_APP)
+    # validamos el entorno virtual
+    if not os.path.exists(RUTA_VENV):
+        print(f"[WARNING] Creando entorno virtual en {RUTA_VENV}..")
+        subprocess.run(["python3","-m","venv",RUTA_VENV], check=True)
+
+    print("[INFO] Activando entorno virtual e instalando Flask")
+    activar_venv = f"source {RUTA_VENV}/bin/activate && pip install --upgrade pip && pip install flask"
+    subprocess.run(activar_venv, shell=True, executable="/bin/bash", check=True)
+
+# Instalar o actualizar repo
+def clonar_actualizar_repo():
+    #os.chdir(RUTA_APP)
+    if os.path.exists(os.path.join(DESTINO,".git")):
+        print(f"[INFO] El repo ya existe en: {DESTINO} , actualizando...")
+        subprocess.run(["git", "-C", DESTINO, "pull", "origin", BRANCH], check=True)
+    else:
+        print(f"[WARNING] Clonando repo desde: {GITHUB_REPO} en {DESTINO}...")
+        subprocess.run(["git", "clone", "-b", BRANCH, GITHUB_REPO, DESTINO], check=True)
+
+# Instalar dependencias
+def instalar_dependencias():
+    req_ruta = os.path.join(DESTINO, "requirements.txt")
+    if os.path.exists(req_ruta):
+        print("[INFO] Instalando dependencias del proyecto..")
+        activar_venv = f"source {RUTA_VENV}/bin/activate && pip install -r {req_ruta}"
+        subprocess.run(activar_venv, shell=True, executable="/bin/bash", check=True)
+    else:
+        print("[ERROR] No se encontró el archivo requirements.txt, saltando la instanlacion de dependencias..")
+
+# configurar gunicorn
+def configurar_gunicorn():
+    print("Instalando gunicorn en entorno virtual..")
+    activar_venv = f"source {RUTA_VENV}/bin/activate && pip install gunicorn"
+    subprocess.run(activar_venv, shell=True, executable="/bin/bash", check=True)
+
+
+    # obtener la ruta absoluta, sino gunicorn no la encuentra
+    ruta_app_absoluta = os.path.abspath(RUTA_APP)
+    nombre_app_wsgi = "app:app"
+    servicio_gunicorn = f"""
+[Unit]
+Description=Gunicorn instance to serve my Flask app
+After=network.target
+
+[Service]
+User=tomas-ubuntu
+Group=www-data
+WorkingDirectory={ruta_app_absoluta}
+Environment="PATH={RUTA_VENV}/bin"
+ExecStart={RUTA_VENV}/bin/gunicorn -w 3 -b unix:/home/tomas-ubuntu/app-Python-Flask/app.sock -m 007 {nombre_app_wsgi}
+
+[Install]
+WantedBy=multi-user.target
+  """
+    with open("/etc/systemd/system/gunicorn.service", "w") as f:
+        f.write(servicio_gunicorn)
+    # levantamos
+    subprocess.run(["sudo", "systemctl", "daemon-reload"], check=True)
+    subprocess.run(["sudo", "systemctl", "enable", "gunicorn"], check=True)
+    subprocess.run(["sudo", "systemctl", "restart", "gunicorn"], check=True)
+    print_date("[INFO] Gunicorn configurado y en ejecución.")
+
+# configurar nginx como proxy inverso
+def configurar_nginx():
+    config_nginx = """
+server {
+    listen 80;
+    server_name _;
+    location / {
+        proxy_pass http://unix:/home/tomas-ubuntu/app.sock;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+    """
+    with open("/etc/nginx/sites-available/flaskapp", "w") as f:
+        f.write(config_nginx)
+    #levantamos
+    subprocess.run(["sudo","ln", "-sf", "/etc/nginx/sites-available/flaskapp","/etc/nginx/sites-enabled"], check=True)
+    subprocess.run(["sudo", "systemctl", "restart", "nginx"], check=True)
+    print_date("[INFO] Nginx configurado y en ejecución..")
+
+# Ejecutamos las funciones
+if __name__ == "__main__":
+    so = detectar_so()
+    print_date("[INFO] Sistema operativo detectado: {so}")
+
+    if so != "desconocido":
+            instalar_paquetes(so)
+            configurar_entorno()
+            clonar_actualizar_repo()
+            instalar_dependencias()
+            configurar_gunicorn()
+            configurar_nginx()
+            print_date("[SUCCESS] Aplicación desplegada correctamente en: http://localhost")
+    else:
+        print("No se pudo detectar el sistema operativo.")
